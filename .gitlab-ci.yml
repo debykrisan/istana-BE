@@ -1,0 +1,83 @@
+stages:
+  - pre-build
+  - build
+  - deploy
+  - migrate
+
+
+
+variables:
+  DOCKER_VERSION: "stable"
+  DOCKER_DIND_VERSION: "18.09-dind"
+  DOCKER_CONFIG_FILE: "--config .docker"
+  PROJECT_GROUP_ID: "portal"
+  PROJECT_NAME: "backend"
+
+default:
+  tags:
+    - docker
+
+include:
+  - project: tabeldata.co.id/gitlab-cicd-templates
+    ref: main
+    file: build.docker.gitlab-ci.yml
+  - project: tabeldata.co.id/gitlab-cicd-templates
+    ref: main
+    file: trigger.deploy.gitlab-ci.yml
+
+
+build:docker:
+  stage: build
+  extends: .build-docker
+  variables:
+    DOCKER_BUILD_ARGS: ""
+    DOCKER_HOST: unix:///var/run/docker.sock
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: always
+
+trigger:deploy:review:
+  extends: .trigger_pipeline
+  stage: deploy
+  needs:
+    - build:docker
+  rules:
+    - if: $CI_ENV_REVIEW_ENABLED == "true" && $CI_COMMIT_TAG =~ /-release/
+      when: always
+    - when: never
+
+trigger:deploy:dev:
+  extends: .trigger_pipeline
+  stage: deploy
+  variables:
+    CI_DEPLOYMENT_ENV: dev
+  needs:
+    - build:docker
+  rules:
+    - if: $CI_ENV_DEV_ENABLED == "true" && $CI_COMMIT_TAG =~ /-dev/
+      when: always
+    - when: never
+
+trigger:deploy:prod:
+  extends: .trigger_pipeline
+  stage: deploy
+  variables:
+    CI_DEPLOYMENT_ENV: prod
+  needs:
+    - build:docker
+  rules:
+    - if: $CI_ENV_DEV_ENABLED == "true" && $CI_COMMIT_TAG =~ /-prod/
+      when: always
+    - when: never
+
+database:migrate:
+  stage: migrate
+  image: 
+    name: migrate/migrate
+    entrypoint: [""]
+  environment:
+    name: review
+  script:
+    - migrate -path="db/schema" -database="mysql://$DATABASE_USERNAME:$DATABASE_PASSWORD@tcp($DATABASE_HOST:$DATABASE_PORT)/$DATABASE_NAME?multiStatements=true" up
+  only:
+    - /-migrate/
